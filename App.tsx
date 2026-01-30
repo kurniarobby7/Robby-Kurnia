@@ -45,7 +45,7 @@ import {
 import { analyzeVehicleHealth } from './services/gemini';
 import { generateWordBlob, getFuelLabel } from './utils/documentGenerator';
 
-const SYNC_ID_STORAGE_KEY = 'bpmp_sync_id_v2';
+const SYNC_ID_STORAGE_KEY = 'bpmp_sync_id_v2_stable';
 const CLOUD_API_BASE = 'https://kvdb.io/AStm3vY8XgS12v6QnUAbG5'; 
 
 const App: React.FC = () => {
@@ -57,9 +57,9 @@ const App: React.FC = () => {
   const [view, setView] = useState<'form' | 'history' | 'settings'>('form');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [showAutoSaveToast, setShowAutoSaveToast] = useState(false);
   
-  const defaultSyncId = `BPMP-${new Date().toLocaleString('id-ID', { month: 'long' }).toUpperCase()}-${new Date().getFullYear()}`;
+  // Menggunakan ID statis sebagai default agar data tidak seolah hilang saat ganti bulan
+  const defaultSyncId = 'BPMP-LAMPUNG-DATABASE-RANDIS';
   const [syncId, setSyncId] = useState<string>('');
 
   const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo>({
@@ -92,9 +92,13 @@ const App: React.FC = () => {
     }
     setSyncId(activeId);
 
+    // Ambil data lokal terlebih dahulu sebagai fallback utama
     const savedReports = localStorage.getItem(APP_STORAGE_KEY);
     if (savedReports) {
-      try { setReports(JSON.parse(savedReports)); } catch (e) { console.error(e); }
+      try { 
+        const parsed = JSON.parse(savedReports);
+        if (Array.isArray(parsed)) setReports(parsed); 
+      } catch (e) { console.error(e); }
     }
 
     const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -134,9 +138,18 @@ const App: React.FC = () => {
             cloudData.forEach((cloudReport: SavedReport) => {
               const idx = merged.findIndex(r => r.id === cloudReport.id);
               if (idx === -1) merged.push(cloudReport);
-              else merged[idx] = cloudReport; 
+              else {
+                // Gunakan yang terbaru berdasarkan createdAt jika ada konflik
+                const existing = merged[idx];
+                if (new Date(cloudReport.createdAt) > new Date(existing.createdAt)) {
+                  merged[idx] = cloudReport;
+                }
+              }
             });
-            return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            const sorted = merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            // Update local storage segera setelah merge
+            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(sorted));
+            return sorted;
           });
         }
       }
@@ -160,6 +173,7 @@ const App: React.FC = () => {
     }
   }, [syncId]);
 
+  // Efek untuk auto-pull saat syncId berubah
   useEffect(() => {
     if (syncId) pullFromCloud();
   }, [syncId, pullFromCloud]);
@@ -170,7 +184,13 @@ const App: React.FC = () => {
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftData));
   }, [vehicleInfo, checks, additionalNote, editingId]);
 
-  useEffect(() => { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(reports)); }, [reports]);
+  // Pantau perubahan reports dan simpan ke localStorage
+  useEffect(() => {
+    if (reports.length > 0) {
+      localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(reports));
+    }
+  }, [reports]);
+
   useEffect(() => { localStorage.setItem(CUSTOM_DRIVERS_KEY, JSON.stringify(customDrivers)); }, [customDrivers]);
   useEffect(() => { localStorage.setItem(CUSTOM_KATIMS_KEY, JSON.stringify(customKatims)); }, [customKatims]);
 
@@ -223,11 +243,11 @@ const App: React.FC = () => {
       };
 
       // Auto-persist new people to custom lists
-      const driverExists = [...PREDEFINED_DRIVERS, ...customDrivers].some(d => d.name === vehicleInfo.driverName && d.nip === vehicleInfo.driverNip);
-      if (!driverExists) setCustomDrivers(prev => [...prev, { name: vehicleInfo.driverName, nip: vehicleInfo.driverNip }]);
+      const driverExists = [...PREDEFINED_DRIVERS, ...customDrivers].some(d => d.name === vehicleInfo.driverName);
+      if (!driverExists && vehicleInfo.driverName) setCustomDrivers(prev => [...prev, { name: vehicleInfo.driverName, nip: vehicleInfo.driverNip }]);
 
-      const katimExists = [...PREDEFINED_KATIMS, ...customKatims].some(k => k.name === vehicleInfo.katimName && k.nip === vehicleInfo.katimNip);
-      if (!katimExists) setCustomKatims(prev => [...prev, { name: vehicleInfo.katimName, nip: vehicleInfo.katimNip }]);
+      const katimExists = [...PREDEFINED_KATIMS, ...customKatims].some(k => k.name === vehicleInfo.katimName);
+      if (!katimExists && vehicleInfo.katimName) setCustomKatims(prev => [...prev, { name: vehicleInfo.katimName, nip: vehicleInfo.katimNip }]);
 
       let updatedReports: SavedReport[];
       if (editingId) {
@@ -237,6 +257,7 @@ const App: React.FC = () => {
       }
       
       setReports(updatedReports);
+      localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(updatedReports));
       if (syncId) await pushToCloud(updatedReports);
 
       resetForm();
@@ -249,9 +270,10 @@ const App: React.FC = () => {
   };
 
   const deleteReport = (id: string) => {
-    if (window.confirm("Hapus data laporan ini?")) {
+    if (window.confirm("Hapus data laporan ini secara permanen?")) {
       const updated = reports.filter(r => r.id !== id);
       setReports(updated);
+      localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(updated));
       if (syncId) pushToCloud(updated);
       if (editingId === id) resetForm();
     }
@@ -265,20 +287,7 @@ const App: React.FC = () => {
     input.select();
     document.execCommand('copy');
     document.body.removeChild(input);
-    alert("Link Sinkronisasi disalin ke clipboard!");
-  };
-
-  const handleDownloadWord = (report: SavedReport) => {
-    const blob = generateWordBlob(report);
-    const fileName = `Checklist_${report.plateNumber}_${report.month}_${report.year}.doc`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    alert("Link Sinkronisasi disalin! Bagikan ke rekan tim untuk berbagi data.");
   };
 
   const PersonSelector = ({ label, nameVal, nipVal, onNameChange, onNipChange, options }: any) => {
@@ -362,7 +371,7 @@ const App: React.FC = () => {
                    </div>
                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex gap-3 text-blue-700 text-[11px] leading-relaxed font-medium">
                       <Info className="flex-shrink-0" size={18} />
-                      <p>Semua perangkat dengan ID yang sama akan berbagi riwayat checklist yang sama secara otomatis.</p>
+                      <p>Data disimpan secara lokal di browser dan dicadangkan ke cloud menggunakan ID Sinkronisasi. <strong>PENTING:</strong> Gunakan ID yang sama di perangkat lain untuk berbagi riwayat.</p>
                    </div>
                 </div>
                 <div className="flex flex-col gap-3 pt-4">
@@ -373,7 +382,7 @@ const App: React.FC = () => {
           </div>
         ) : view === 'history' ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            <div className="relative group"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Cari unit, driver, atau plat..." className="w-full bg-white border-2 border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-sm font-semibold outline-none focus:border-indigo-500 shadow-sm" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
+            <div className="relative group"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Cari unit, driver, atau plat..." className="w-full bg-white border-2 border-slate-200 rounded-2xl pl-12 pr-6 py-4 text-sm font-semibold outline-none focus:border-indigo-500 shadow-sm" value={searchQuery} searchQuery onChange={e => setSearchQuery(e.target.value)} /></div>
             <div className="flex items-center justify-between px-1">
               <h2 className="font-black text-slate-400 text-[10px] uppercase tracking-[0.2em] flex items-center gap-2"><History size={14}/> {filteredReports.length} Laporan</h2>
               <button onClick={() => { resetForm(); setView('form'); }} className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-1"><PlusCircle size={14}/> Buat Laporan</button>
@@ -389,12 +398,32 @@ const App: React.FC = () => {
                   <div className="flex gap-1"><button onClick={() => loadReportForEditing(r)} className="text-slate-400 hover:text-indigo-500 p-2.5 rounded-xl border border-transparent hover:border-indigo-100 transition-all"><Edit3 size={18}/></button><button onClick={() => deleteReport(r.id)} className="text-slate-400 hover:text-rose-500 p-2.5 rounded-xl border border-transparent hover:border-rose-100 transition-all"><Trash2 size={18}/></button></div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {/* Cast to ItemState[] to fix "Property 'week1' does not exist on type 'unknown'" errors */}
-                  <button onClick={() => { const issuesCount = (Object.values(r.checks) as ItemState[]).filter(c => c.week1 === 'issue' || c.week3 === 'issue').length; const msg = `*RANDIS BPMP LAMPUNG*%0A*Unit:* ${r.vehicleType} (${r.plateNumber})%0A*Status:* ${issuesCount > 0 ? '⚠️ '+issuesCount+' Temuan' : '✅ Aman'}`; window.open(`https://wa.me/?text=${msg}`, '_blank'); }} className="flex items-center justify-center gap-2 bg-emerald-500 text-white py-4 rounded-2xl font-black text-[10px] shadow-lg shadow-emerald-500/20 active:scale-95"><MessageCircle size={16} /> WA</button>
-                  <button onClick={() => handleDownloadWord(r)} className="flex items-center justify-center gap-2 bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95"><ExternalLink size={16} /> WORD F4</button>
+                  <button onClick={() => { 
+                    const issuesCount = (Object.values(r.checks) as ItemState[]).filter(c => c.week1 === 'issue' || c.week3 === 'issue').length; 
+                    const msg = `*RANDIS BPMP LAMPUNG*%0A*Unit:* ${r.vehicleType} (${r.plateNumber})%0A*Periode:* ${r.month} ${r.year}%0A*Status:* ${issuesCount > 0 ? '⚠️ '+issuesCount+' Temuan' : '✅ Aman'}`; 
+                    window.open(`https://wa.me/?text=${msg}`, '_blank'); 
+                  }} className="flex items-center justify-center gap-2 bg-emerald-500 text-white py-4 rounded-2xl font-black text-[10px] shadow-lg shadow-emerald-500/20 active:scale-95"><MessageCircle size={16} /> WA</button>
+                  <button onClick={() => {
+                    const blob = generateWordBlob(r);
+                    const fileName = `Checklist_${r.plateNumber}_${r.month}_${r.year}.doc`;
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }} className="flex items-center justify-center gap-2 bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] shadow-lg active:scale-95"><ExternalLink size={16} /> WORD F4</button>
                 </div>
               </div>
             ))}
+            {filteredReports.length === 0 && (
+              <div className="text-center py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-300">
+                <Car size={48} className="mx-auto text-slate-200 mb-4" />
+                <p className="text-sm font-bold text-slate-400">Belum ada riwayat laporan.</p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">

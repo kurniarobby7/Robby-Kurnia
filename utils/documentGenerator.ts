@@ -29,22 +29,21 @@ export const generateWordBlob = (data: SavedReport) => {
   const html = `<html><head><meta charset='utf-8'>
     <style>
       @page { size: 215.9mm 330.2mm; margin: 10mm 15mm; }
-      body { font-family: 'Times New Roman', serif; font-size: 8pt; color: #000; line-height: 1.1; }
-      .header { text-align: center; border-bottom: 2pt double black; padding-bottom: 5px; margin-bottom: 10px; }
-      .header h1 { margin: 0; font-size: 11pt; text-transform: uppercase; }
-      .header p { margin: 0; font-size: 8pt; font-style: italic; }
-      .title { text-align: center; font-weight: bold; font-size: 10pt; text-decoration: underline; margin-bottom: 10px; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-      th { background: #E5E5E5; border: 0.5pt solid black; padding: 2px; font-size: 7.5pt; text-align: center; }
+      body { font-family: 'Times New Roman', serif; font-size: 8.5pt; color: #000; line-height: 1.2; }
+      .header { text-align: center; border-bottom: 2pt double black; padding-bottom: 8px; margin-bottom: 12px; }
+      .header h1 { margin: 0; font-size: 12pt; text-transform: uppercase; font-weight: bold; }
+      .header p { margin: 2px 0 0 0; font-size: 8.5pt; font-style: italic; }
+      .title { text-align: center; font-weight: bold; font-size: 11pt; text-decoration: underline; margin-bottom: 15px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+      th { background: #E5E5E5; border: 0.5pt solid black; padding: 3px; font-size: 8pt; text-align: center; }
       td { border: 0.5pt solid black; vertical-align: middle; }
-      .info-table td { border: none; padding: 1px; font-size: 8.5pt; }
-      .sig-table { margin-top: 15px; }
-      .sig-table td { border: none; text-align: center; width: 50%; padding-top: 5px; font-size: 9pt; }
-      .conclusion { border: 0.5pt solid black; padding: 5px; margin-top: 5px; font-size: 7.5pt; min-height: 40px; }
+      .info-table td { border: none; padding: 2px; font-size: 9pt; }
+      .sig-table { margin-top: 25px; }
+      .sig-table td { border: none; text-align: center; width: 50%; padding-top: 5px; font-size: 9.5pt; }
+      .conclusion { border: 0.5pt solid black; padding: 8px; margin-top: 5px; font-size: 8.5pt; min-height: 50px; }
     </style>
   </head><body>
     <div class="header">
-      <h1>KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI</h1>
       <h1>BALAI PENJAMINAN MUTU PENDIDIKAN (BPMP) PROVINSI LAMPUNG</h1>
       <p>Jl. Gatot Subroto No.44A, Pahoman, Bandar Lampung, Telp: (0721) 252477</p>
     </div>
@@ -79,13 +78,13 @@ export const generateWordBlob = (data: SavedReport) => {
       <tbody>${tableRows}</tbody>
     </table>
 
-    <div style="font-weight: bold; font-size: 8pt; margin-top: 5px;">Kesimpulan & Saran Tindak Lanjut:</div>
+    <div style="font-weight: bold; font-size: 9pt; margin-top: 8px;">Kesimpulan & Saran Tindak Lanjut:</div>
     <div class="conclusion">${data.additionalNote || 'Kendaraan dalam kondisi layak jalan.'}</div>
 
     <table class="sig-table">
       <tr>
-        <td>Mengetahui,<br/>Ketua Tim RTPK<br/><br/><br/><br/><strong>${data.katimName}</strong><br/>NIP. ${data.katimNip}</td>
-        <td>Bandar Lampung, ${new Date().toLocaleDateString('id-ID', {day: 'numeric', month: 'long', year: 'numeric'})}<br/>Pemeriksa / Driver<br/><br/><br/><br/><strong>${data.driverName}</strong><br/>NIP. ${data.driverNip}</td>
+        <td>Mengetahui,<br/>Ketua Tim RTPK<br/><br/><br/><br/><br/><strong>${data.katimName}</strong><br/>NIP. ${data.katimNip}</td>
+        <td>Bandar Lampung, ${new Date().toLocaleDateString('id-ID', {day: 'numeric', month: 'long', year: 'numeric'})}<br/>Pemeriksa / Driver<br/><br/><br/><br/><br/><strong>${data.driverName}</strong><br/>NIP. ${data.driverNip}</td>
       </tr>
     </table>
   </body></html>`;
