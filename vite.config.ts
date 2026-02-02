@@ -13,8 +13,8 @@ export default defineConfig({
   server: {
     port: 3000
   },
-  // Define process.env secara spesifik untuk API_KEY guna menghindari error 'process is not defined'
+  // Memastikan process.env.API_KEY selalu terdefinisi sebagai string agar tidak error di client side
   define: {
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY)
+    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || "")
   }
 });
