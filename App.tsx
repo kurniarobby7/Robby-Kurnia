@@ -24,7 +24,11 @@ import {
   AlertCircle,
   Bell,
   FileText,
-  X
+  X,
+  XCircle,
+  Calendar,
+  User as UserIcon,
+  Fuel
 } from 'lucide-react';
 import { 
   CheckStatus, 
@@ -32,7 +36,8 @@ import {
   VehicleInfo, 
   SavedReport,
   User,
-  UserRole
+  UserRole,
+  ItemState
 } from './types';
 import { 
   CHECKLIST_ITEMS, 
@@ -49,7 +54,7 @@ import { generateWordBlob, getFuelLabel, generateDocumentHtml } from './utils/do
 const SYNC_ID_STORAGE_KEY = 'bpmp_sync_id_v2_stable';
 const CLOUD_API_BASE = 'https://kvdb.io/AStm3vY8XgS12v6QnUAbG5'; 
 
-const LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg/800px-Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg.png";
+const LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg/1024px-Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg.png";
 
 interface ToastState {
   message: string;
@@ -93,8 +98,8 @@ const App: React.FC = () => {
     vehicleType: '',
     driverName: '',
     driverNip: '',
-    katimName: '',
-    katimNip: '',
+    katimName: PREDEFINED_KATIMS[0].name,
+    katimNip: PREDEFINED_KATIMS[0].nip,
     odometer: '',
     fuelLevel: 50, 
     month: new Date().toLocaleString('id-ID', { month: 'long' }),
@@ -115,7 +120,6 @@ const App: React.FC = () => {
       try { 
         const user = JSON.parse(sessionStr);
         setCurrentUser(user);
-        // Opsi: Katim/Pengawas otomatis ke Riwayat
         if (user.role !== 'Driver') setView('history');
       } catch (e) { console.error(e); }
     }
@@ -126,6 +130,40 @@ const App: React.FC = () => {
       try { setReports(JSON.parse(savedReports)); } catch (e) { console.error(e); }
     }
   }, []);
+
+  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const name = formData.get('name') as string;
+    const nip = formData.get('nip') as string;
+    const role = formData.get('role') as UserRole;
+    const password = formData.get('password') as string;
+    const confirm = formData.get('confirm') as string;
+
+    if (!name || !nip || !password || !role) {
+      showNotification("Mohon lengkapi semua kolom!", "error");
+      return;
+    }
+    
+    if (password !== confirm) {
+      showNotification("Password tidak cocok!", "error");
+      return;
+    }
+    
+    const latestUsers = JSON.parse(localStorage.getItem(USERS_STORAGE_KEY) || '[]');
+    if (latestUsers.some((u: User) => u.nip === nip)) {
+      showNotification("NIP sudah terdaftar!", "error");
+      return;
+    }
+
+    const newUser: User = { id: crypto.randomUUID(), name, nip, role, password };
+    const updatedUsers = [...latestUsers, newUser];
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
+    setRegisteredUsers(updatedUsers);
+    
+    showNotification("Pendaftaran Berhasil!", "success");
+    setAuthMode('login');
+  };
 
   const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -139,7 +177,13 @@ const App: React.FC = () => {
     if (user) {
       setCurrentUser(user);
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-      // Proteksi menu sesuai role
+      // Sinkronkan info kendaraan dengan user yang login
+      setVehicleInfo(prev => ({
+        ...prev,
+        driverName: user.name,
+        driverNip: user.nip
+      }));
+      
       if (user.role !== 'Driver') {
         setView('history');
       } else {
@@ -163,9 +207,15 @@ const App: React.FC = () => {
     if (!vehicleInfo.plateNumber) return showNotification("No. Polisi wajib diisi!", "error");
     setIsSaving(true);
     try {
-      const aiAnalysis = await analyzeVehicleHealth({ ...vehicleInfo, checks, additionalNote });
-      const reportData: SavedReport = {
+      const finalVehicleInfo = {
         ...vehicleInfo,
+        driverName: currentUser.name,
+        driverNip: currentUser.nip
+      };
+
+      const aiAnalysis = await analyzeVehicleHealth({ ...finalVehicleInfo, checks, additionalNote });
+      const reportData: SavedReport = {
+        ...finalVehicleInfo,
         id: editingId || crypto.randomUUID(),
         checks, additionalNote, aiAnalysis,
         createdAt: new Date().toISOString(),
@@ -210,7 +260,6 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   }, [syncId]);
 
-  // Fix: Added deleteReport function
   const deleteReport = async (id: string) => {
     if (!window.confirm("Hapus laporan ini?")) return;
     const updatedReports = reports.filter(r => r.id !== id);
@@ -226,7 +275,6 @@ const App: React.FC = () => {
     showNotification("Laporan berhasil dihapus", "success");
   };
 
-  // Fix: Added NotificationToast component
   const NotificationToast = () => {
     if (!toast.visible) return null;
     return (
@@ -293,20 +341,98 @@ const App: React.FC = () => {
             </div>
             <div className="bg-white/10 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
                <div className="flex bg-white/5 rounded-2xl p-1 mb-8">
-                <button onClick={() => setAuthMode('login')} className={`flex-1 py-3.5 rounded-xl text-xs font-black uppercase ${authMode === 'login' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}>MASUK</button>
-                <button onClick={() => setAuthMode('register')} className={`flex-1 py-3.5 rounded-xl text-xs font-black uppercase ${authMode === 'register' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}>DAFTAR</button>
+                <button onClick={() => { setAuthMode('login'); setShowPassword(false); setShowConfirmPassword(false); }} className={`flex-1 py-3.5 rounded-xl text-xs font-black uppercase ${authMode === 'login' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}>MASUK</button>
+                <button onClick={() => { setAuthMode('register'); setShowPassword(false); setShowConfirmPassword(false); }} className={`flex-1 py-3.5 rounded-xl text-xs font-black uppercase ${authMode === 'register' ? 'bg-indigo-500 text-white shadow-lg' : 'text-slate-500'}`}>DAFTAR</button>
               </div>
-              <form onSubmit={authMode === 'login' ? handleLogin : (e) => e.preventDefault()} className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">NIP Pengguna</label>
-                  <input name="nip" required className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-500" placeholder="Masukkan NIP" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Password</label>
-                  <input name="password" type="password" required className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-500" placeholder="••••••••" />
-                </div>
-                <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl font-black text-xs tracking-[0.2em] shadow-xl uppercase transition-all">Masuk Sistem</button>
-              </form>
+              
+              {authMode === 'login' ? (
+                <form onSubmit={handleLogin} className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">NIP Pengguna</label>
+                    <input name="nip" required className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm font-bold outline-none focus:border-indigo-500" placeholder="Masukkan NIP" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Password</label>
+                    <div className="relative">
+                      <input 
+                        name="password" 
+                        type={showPassword ? "text" : "password"} 
+                        required 
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 pr-14 text-sm font-bold outline-none focus:border-indigo-500" 
+                        placeholder="••••••••" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white transition-colors"
+                      >
+                        {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      </button>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl font-black text-xs tracking-[0.2em] shadow-xl uppercase transition-all">Masuk Sistem</button>
+                </form>
+              ) : (
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5 px-1">Nama Lengkap</label>
+                    <input name="name" required className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 text-sm font-bold outline-none focus:border-indigo-500" placeholder="Nama Lengkap" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5 px-1">NIP</label>
+                      <input name="nip" required className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 text-sm font-bold outline-none focus:border-indigo-500" placeholder="NIP" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5 px-1">Jabatan</label>
+                      <select name="role" required className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 text-sm font-bold outline-none focus:border-indigo-500 appearance-none bg-slate-800">
+                        <option value="Driver">Driver</option>
+                        <option value="Pengawas">Pengawas</option>
+                        <option value="Katim">Katim RTPK</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5 px-1">Password</label>
+                    <div className="relative">
+                      <input 
+                        name="password" 
+                        type={showPassword ? "text" : "password"} 
+                        required 
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 pr-12 text-sm font-bold outline-none focus:border-indigo-500" 
+                        placeholder="••••••••" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-colors"
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1.5 px-1">Konfirmasi Password</label>
+                    <div className="relative">
+                      <input 
+                        name="confirm" 
+                        type={showConfirmPassword ? "text" : "password"} 
+                        required 
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 pr-12 text-sm font-bold outline-none focus:border-indigo-500" 
+                        placeholder="••••••••" 
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white transition-colors"
+                      >
+                        {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 py-4 rounded-xl font-black text-xs tracking-[0.2em] shadow-lg uppercase transition-all mt-2">Daftar Akun</button>
+                </form>
+              )}
             </div>
             <div className="text-center"><p className="text-[8px] italic text-slate-500">created by.R.project</p></div>
           </div>
@@ -359,7 +485,6 @@ const App: React.FC = () => {
                 ))}
               </div>
             ) : view === 'form' ? (
-              /* FORM Driver Only */
               <div className="space-y-6">
                 {currentUser.role !== 'Driver' ? (
                   <div className="bg-white rounded-[2.5rem] p-12 text-center border border-slate-200">
@@ -369,29 +494,147 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    {/* Render Form Inputs Seperti Sebelumnya */}
                     <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200 shadow-sm space-y-6">
                       <div className="grid grid-cols-2 gap-4">
-                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No Polisi</label><input className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold uppercase border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.plateNumber} onChange={e => setVehicleInfo({...vehicleInfo, plateNumber: e.target.value.toUpperCase()})} /></div>
-                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Unit Kendaraan</label><input className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold uppercase border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.vehicleType} onChange={e => setVehicleInfo({...vehicleInfo, vehicleType: e.target.value.toUpperCase()})} /></div>
+                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No Polisi</label><input className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold uppercase border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.plateNumber} onChange={e => setVehicleInfo({...vehicleInfo, plateNumber: e.target.value.toUpperCase()})} placeholder="BE 1234 XX" /></div>
+                         <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Unit Kendaraan</label><input className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold uppercase border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.vehicleType} onChange={e => setVehicleInfo({...vehicleInfo, vehicleType: e.target.value.toUpperCase()})} placeholder="AVANZA / INNOVA" /></div>
                       </div>
-                      <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Odometer (KM)</label><input type="number" className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.odometer} onChange={e => setVehicleInfo({...vehicleInfo, odometer: e.target.value})} /></div>
-                      <button onClick={saveReport} disabled={isSaving} className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl flex items-center justify-center gap-2 active:scale-95 transition-all">
-                        {isSaving ? <Loader2 className="animate-spin" /> : <><Zap size={18} fill="white"/> Kirim Laporan</>}
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Odometer (KM)</label><input type="number" className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold border-2 border-transparent focus:border-indigo-500 outline-none" value={vehicleInfo.odometer} onChange={e => setVehicleInfo({...vehicleInfo, odometer: e.target.value})} /></div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Fuel size={12}/> Takaran BBM: {getFuelLabel(vehicleInfo.fuelLevel)}</label>
+                          <input type="range" min="0" max="100" step="25" className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 mt-4" value={vehicleInfo.fuelLevel} onChange={e => setVehicleInfo({...vehicleInfo, fuelLevel: parseInt(e.target.value)})} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="p-5 bg-indigo-50 rounded-3xl border border-indigo-100 flex items-center gap-4">
+                          <div className="bg-white p-3 rounded-2xl text-indigo-600 shadow-sm"><UserIcon size={20}/></div>
+                          <div>
+                            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Pemeriksa / Driver</p>
+                            <p className="text-sm font-bold text-slate-800">{currentUser.name} <span className="text-slate-400 font-medium ml-1 text-xs">({currentUser.nip})</span></p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ketua Tim RTPK</label>
+                          <select 
+                            className="w-full bg-slate-50 rounded-2xl px-5 py-4 text-sm font-bold border-2 border-transparent focus:border-indigo-500 outline-none appearance-none" 
+                            value={vehicleInfo.katimNip} 
+                            onChange={e => {
+                              const katim = PREDEFINED_KATIMS.find(k => k.nip === e.target.value);
+                              if (katim) setVehicleInfo({...vehicleInfo, katimName: katim.name, katimNip: katim.nip});
+                            }}
+                          >
+                            {PREDEFINED_KATIMS.map(k => <option key={k.nip} value={k.nip}>{k.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      
+                      {/* Section Checklist */}
+                      <div className="space-y-8 pt-4">
+                        {CATEGORIES.map(cat => (
+                          <div key={cat} className="space-y-4">
+                            <h4 className="text-[11px] font-black text-indigo-600 uppercase tracking-widest border-b border-indigo-100 pb-2 flex items-center gap-2">
+                              <ShieldCheck size={14}/> {cat}
+                            </h4>
+                            {CHECKLIST_ITEMS.filter(item => item.category === cat).map(item => (
+                              <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 hover:border-indigo-200 transition-all">
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                  <span className="text-xs font-black text-slate-700 uppercase tracking-tight leading-relaxed flex-1">{item.label}</span>
+                                  <div className="flex gap-2 w-full sm:w-auto">
+                                    <div className="flex flex-1 sm:flex-initial bg-slate-100 p-1 rounded-xl">
+                                      <button onClick={() => setChecks(prev => {
+                                        const existing = prev[item.id] || { week1: null, week3: null, note: '' };
+                                        return { ...prev, [item.id]: { ...existing, week1: existing.week1 === 'ok' ? null : 'ok' } };
+                                      })} className={`flex-1 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${checks[item.id]?.week1 === 'ok' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
+                                        <CheckCircle size={14}/> W1
+                                      </button>
+                                      <button onClick={() => setChecks(prev => {
+                                        const existing = prev[item.id] || { week1: null, week3: null, note: '' };
+                                        return { ...prev, [item.id]: { ...existing, week1: existing.week1 === 'issue' ? null : 'issue' } };
+                                      })} className={`flex-1 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${checks[item.id]?.week1 === 'issue' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
+                                        <XCircle size={14}/> W1
+                                      </button>
+                                    </div>
+                                    <div className="flex flex-1 sm:flex-initial bg-slate-100 p-1 rounded-xl">
+                                      <button onClick={() => setChecks(prev => {
+                                        const existing = prev[item.id] || { week1: null, week3: null, note: '' };
+                                        return { ...prev, [item.id]: { ...existing, week3: existing.week3 === 'ok' ? null : 'ok' } };
+                                      })} className={`flex-1 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${checks[item.id]?.week3 === 'ok' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
+                                        <CheckCircle size={14}/> W3
+                                      </button>
+                                      <button onClick={() => setChecks(prev => {
+                                        const existing = prev[item.id] || { week1: null, week3: null, note: '' };
+                                        return { ...prev, [item.id]: { ...existing, week3: existing.week3 === 'issue' ? null : 'issue' } };
+                                      })} className={`flex-1 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${checks[item.id]?.week3 === 'issue' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>
+                                        <XCircle size={14}/> W3
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                                {item.id === 'doc_1' ? (
+                                  <div className="relative">
+                                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-500"><Calendar size={16}/></div>
+                                    <input 
+                                      type="date" 
+                                      className="w-full bg-slate-50 rounded-2xl pl-12 pr-5 py-3.5 text-xs font-bold border-2 border-transparent focus:border-indigo-500 outline-none text-slate-700"
+                                      value={checks[item.id]?.note || ''}
+                                      onChange={e => setChecks(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || { week1: null, week3: null, note: '' }), note: e.target.value } }))}
+                                    />
+                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] font-black text-indigo-400 uppercase tracking-widest pointer-events-none">Masa STNK</div>
+                                  </div>
+                                ) : (
+                                  <div className="relative">
+                                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"><MessageSquare size={16}/></div>
+                                    <input 
+                                      placeholder="Tambahkan keterangan temuan (opsional)..." 
+                                      className="w-full bg-slate-50 rounded-2xl pl-12 pr-5 py-3.5 text-xs font-bold border-2 border-transparent focus:border-indigo-500 outline-none text-slate-700"
+                                      value={checks[item.id]?.note || ''}
+                                      onChange={e => setChecks(prev => ({ ...prev, [item.id]: { ...(prev[item.id] || { week1: null, week3: null, note: '' }), note: e.target.value } }))}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="space-y-2 pt-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Kesimpulan / Catatan Akhir</label>
+                        <textarea className="w-full bg-slate-50 rounded-3xl px-6 py-5 text-sm font-bold border-2 border-transparent focus:border-indigo-500 outline-none min-h-[120px] shadow-inner" value={additionalNote} onChange={e => setAdditionalNote(e.target.value)} placeholder="Tuliskan saran tindak lanjut atau kondisi umum kendaraan..." />
+                      </div>
+
+                      <button onClick={saveReport} disabled={isSaving} className="w-full py-6 bg-indigo-600 text-white rounded-[2.5rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 flex items-center justify-center gap-3 active:scale-[0.98] transition-all disabled:opacity-50">
+                        {isSaving ? <Loader2 className="animate-spin" /> : <><Zap size={20} fill="white"/> Kirim Laporan Inspeksi</>}
                       </button>
                     </div>
                   </>
                 )}
               </div>
             ) : (
-              /* Settings View */
               <div className="bg-white rounded-[2.5rem] p-8 border border-slate-200">
-                <h3 className="font-black text-slate-800 uppercase text-xs mb-4">Cloud Database Sync</h3>
-                <input className="w-full bg-slate-50 rounded-2xl px-5 py-4 mb-4 font-bold border-2 border-transparent focus:border-indigo-500 outline-none uppercase" value={syncId} onChange={e => setSyncId(e.target.value.toUpperCase())} />
-                <button onClick={() => { localStorage.setItem(SYNC_ID_STORAGE_KEY, syncId); pullFromCloud(); }} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg">Hubungkan Database</button>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-emerald-500 text-white p-3 rounded-2xl"><Cloud size={20}/></div>
+                  <div>
+                    <h3 className="font-black text-slate-800 uppercase text-xs tracking-widest">Cloud Database Sync</h3>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase">SINKRONISASI DATA ARMADA</p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">ID DATABASE</label>
+                    <input className="w-full bg-slate-50 rounded-2xl px-5 py-4 font-bold border-2 border-transparent focus:border-indigo-500 outline-none uppercase text-indigo-600" value={syncId} onChange={e => setSyncId(e.target.value.toUpperCase())} />
+                  </div>
+                  <button onClick={() => { localStorage.setItem(SYNC_ID_STORAGE_KEY, syncId); pullFromCloud(); }} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-center gap-2">
+                    {isSyncing ? <Loader2 className="animate-spin" size={18}/> : <><Cloud size={18}/> Hubungkan Sekarang</>}
+                  </button>
+                </div>
               </div>
             )}
-            <div className="py-10 text-center"><p className="text-[9px] italic text-slate-400">created by.R.project</p></div>
+            <div className="py-10 text-center"><p className="text-[9px] italic text-slate-400">created by.R.project v3.4</p></div>
           </main>
         </div>
       )}

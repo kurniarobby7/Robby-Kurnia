@@ -10,8 +10,8 @@ export const getFuelLabel = (val: number) => {
   return 'Penuh';
 };
 
-// URL Logo Tut Wuri Handayani / Kemendikbud
-const LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg/800px-Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg.png";
+// URL Logo Tut Wuri Handayani yang benar dan berfungsi
+const LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9c/Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg/1024px-Logo_of_Ministry_of_Education_and_Culture_of_Republic_of_Indonesia.svg.png";
 
 export const generateDocumentHtml = (data: SavedReport) => {
   const tableRows = CATEGORIES.map(cat => {
