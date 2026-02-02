@@ -1,19 +1,13 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { SavedReport, ChecklistItem } from "../types";
+import { SavedReport } from "../types";
 import { CHECKLIST_ITEMS } from "../constants";
 
+// Analyze vehicle health using Gemini API
 export const analyzeVehicleHealth = async (report: Partial<SavedReport>) => {
-  const apiKey = process.env.API_KEY;
-
-  // Cek apakah API Key tersedia
-  if (!apiKey || apiKey === "undefined" || apiKey === "") {
-    console.warn("Gemini API Key tidak ditemukan. Laporan akan disimpan tanpa analisis AI.");
-    return "Analisis AI dilewati: API Key belum dikonfigurasi di environment variable.";
-  }
-
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    // Always use process.env.API_KEY directly when initializing the client instance
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     // Siapkan daftar isu untuk prompt
     const issues: string[] = [];
@@ -27,7 +21,7 @@ export const analyzeVehicleHealth = async (report: Partial<SavedReport>) => {
       }
     });
 
-    const prompt = `
+    const promptText = `
       Sebagai ahli pemeliharaan armada kendaraan dinas pemerintah (BPMP Lampung), 
       analisis laporan inspeksi berikut dan berikan ringkasan profesional yang singkat 
       mengenai kesehatan kendaraan dan rekomendasi pemeliharaan mendesak.
@@ -50,15 +44,17 @@ export const analyzeVehicleHealth = async (report: Partial<SavedReport>) => {
       Gunakan bahasa Indonesia yang profesional dan lugas.
     `;
 
+    // Using ai.models.generateContent with model name and prompt
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: prompt,
+      contents: promptText,
       config: {
         temperature: 0.7,
         topP: 0.95,
       },
     });
 
+    // The GenerateContentResponse object features a text property (not a method)
     return response.text;
   } catch (error) {
     console.error("AI Analysis failed:", error);

@@ -1,5 +1,14 @@
 
 export type CheckStatus = 'ok' | 'issue' | null;
+export type UserRole = 'Katim' | 'Driver' | 'Pengawas';
+
+export interface User {
+  id: string;
+  name: string;
+  nip: string;
+  role: UserRole;
+  password?: string;
+}
 
 export interface ItemState {
   week1: CheckStatus;
@@ -35,6 +44,7 @@ export interface SavedReport extends VehicleInfo {
   additionalNote: string;
   aiAnalysis?: string;
   createdAt: string;
+  createdByNip?: string;
 }
 
 export interface ChecklistItem {

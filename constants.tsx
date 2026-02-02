@@ -37,3 +37,5 @@ export const APP_STORAGE_KEY = 'bpmp_fleet_reports_v1';
 export const DRAFT_STORAGE_KEY = 'bpmp_fleet_draft_v1';
 export const CUSTOM_DRIVERS_KEY = 'bpmp_custom_drivers_v1';
 export const CUSTOM_KATIMS_KEY = 'bpmp_custom_katims_v1';
+export const USERS_STORAGE_KEY = 'bpmp_registered_users_v1';
+export const CURRENT_USER_KEY = 'bpmp_active_session_v1';
