@@ -4,17 +4,14 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      input: './index.html'
-    }
-  },
   server: {
-    port: 3000
+    port: 3000,
+    host: true
   },
-  // Memastikan process.env.API_KEY selalu terdefinisi sebagai string agar tidak error di client side
   define: {
-    'process.env.API_KEY': JSON.stringify(process.env.API_KEY || "")
+    // Memastikan process.env tersedia di browser saat development
+    'process.env': {
+      API_KEY: JSON.stringify(process.env.VITE_API_KEY || "")
+    }
   }
 });

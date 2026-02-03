@@ -5,18 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <!-- SEO & Social Media -->
   <title>Ceklis Randis BPMP Lampung - Sistem Inspeksi Kendaraan</title>
   <meta name="description" content="Aplikasi checklist pemeriksaan kendaraan operasional BPMP Provinsi Lampung dengan analisis AI.">
   <meta name="theme-color" content="#0f172a">
   
-  <!-- Open Graph / Facebook -->
-  <meta property="og:type" content="website">
-  <meta property="og:title" content="Ceklis Randis BPMP Lampung">
-  <meta property="og:description" content="Monitoring kesehatan kendaraan dinas lebih cerdas dengan teknologi AI.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/lucide-react/lucide/main/icons/car.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/lucide-react/lucide/main/icons/shield-check.png">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -33,11 +25,9 @@
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
-    /* Smooth Scroll */
     html {
       scroll-behavior: smooth;
     }
-    /* Custom Scrollbar */
     ::-webkit-scrollbar {
       width: 6px;
     }
@@ -52,20 +42,19 @@
 <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.4/",
     "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
     "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.3",
-    "vite": "https://esm.sh/vite@^7.3.1"
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.3"
   }
 }
 </script>
 </head>
 <body class="bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
   <div id="root"></div>
-  <!-- Entry point utama untuk Vite -->
-  <script type="module" src="./index.tsx"></script>
+  <script type="module" src="/index.tsx"></script>
 </body>
 </html>
