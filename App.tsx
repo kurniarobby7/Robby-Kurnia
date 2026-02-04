@@ -28,7 +28,8 @@ import {
   XCircle,
   Calendar,
   User as UserIcon,
-  Fuel
+  Fuel,
+  RefreshCw
 } from 'lucide-react';
 import { 
   CheckStatus, 
@@ -62,6 +63,11 @@ interface ToastState {
   visible: boolean;
 }
 
+interface CloudDataStructure {
+  users: User[];
+  reports: SavedReport[];
+}
+
 const App: React.FC = () => {
   // Auth State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -89,7 +95,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<'form' | 'history' | 'settings'>('form');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [syncId, setSyncId] = useState<string>('BPMP-LAMPUNG-DATABASE-RANDIS');
+  const [syncId, setSyncId] = useState<string>(localStorage.getItem(SYNC_ID_STORAGE_KEY) || 'BPMP-LAMPUNG-DATABASE-RANDIS');
   const [previewReport, setPreviewReport] = useState<SavedReport | null>(null);
 
   // Form State
@@ -109,12 +115,51 @@ const App: React.FC = () => {
   const [checks, setChecks] = useState<ChecklistData>({});
   const [additionalNote, setAdditionalNote] = useState('');
 
-  // Initial Load
-  useEffect(() => {
-    const usersStr = localStorage.getItem(USERS_STORAGE_KEY);
-    if (usersStr) {
-      try { setRegisteredUsers(JSON.parse(usersStr)); } catch (e) { console.error(e); }
+  // Sinkronisasi Cloud (Shared Logic)
+  const pushToCloud = useCallback(async (usersList: User[], reportsList: SavedReport[]) => {
+    if (!syncId) return;
+    try {
+      const payload: CloudDataStructure = { users: usersList, reports: reportsList };
+      await fetch(`${CLOUD_API_BASE}/${syncId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) { 
+      console.error("Cloud Push Error:", e);
     }
+  }, [syncId]);
+
+  const pullFromCloud = useCallback(async (targetId: string = syncId) => {
+    if (!targetId) return;
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`${CLOUD_API_BASE}/${targetId}`);
+      if (response.ok) {
+        const cloudData: CloudDataStructure = await response.json();
+        if (cloudData && typeof cloudData === 'object') {
+          const fetchedUsers = cloudData.users || [];
+          const fetchedReports = cloudData.reports || [];
+          
+          setRegisteredUsers(fetchedUsers);
+          setReports(fetchedReports);
+          
+          localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(fetchedUsers));
+          localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(fetchedReports));
+          
+          return { users: fetchedUsers, reports: fetchedReports };
+        }
+      }
+    } catch (e) { 
+      console.error("Cloud Pull Error:", e);
+    } finally { 
+      setIsSyncing(false); 
+    }
+    return null;
+  }, [syncId]);
+
+  // Initial Load & Auto-Sync
+  useEffect(() => {
     const sessionStr = localStorage.getItem(CURRENT_USER_KEY);
     if (sessionStr) {
       try { 
@@ -123,15 +168,19 @@ const App: React.FC = () => {
         if (user.role !== 'Driver') setView('history');
       } catch (e) { console.error(e); }
     }
-    const savedSyncId = localStorage.getItem(SYNC_ID_STORAGE_KEY);
-    if (savedSyncId) setSyncId(savedSyncId);
-    const savedReports = localStorage.getItem(APP_STORAGE_KEY);
-    if (savedReports) {
-      try { setReports(JSON.parse(savedReports)); } catch (e) { console.error(e); }
-    }
-  }, []);
+    
+    // Load local data first for speed
+    const localUsers = localStorage.getItem(USERS_STORAGE_KEY);
+    if (localUsers) setRegisteredUsers(JSON.parse(localUsers));
+    
+    const localReports = localStorage.getItem(APP_STORAGE_KEY);
+    if (localReports) setReports(JSON.parse(localReports));
 
-  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
+    // Then sync from cloud automatically
+    pullFromCloud();
+  }, [pullFromCloud]);
+
+  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const name = formData.get('name') as string;
@@ -140,56 +189,53 @@ const App: React.FC = () => {
     const password = formData.get('password') as string;
     const confirm = formData.get('confirm') as string;
 
-    if (!name || !nip || !password || !role) {
-      showNotification("Mohon lengkapi semua kolom!", "error");
-      return;
-    }
+    if (!name || !nip || !password || !role) return showNotification("Lengkapi kolom!", "error");
+    if (password !== confirm) return showNotification("Password tidak cocok!", "error");
     
-    if (password !== confirm) {
-      showNotification("Password tidak cocok!", "error");
-      return;
-    }
-    
-    const latestUsers = JSON.parse(localStorage.getItem(USERS_STORAGE_KEY) || '[]');
-    if (latestUsers.some((u: User) => u.nip === nip)) {
-      showNotification("NIP sudah terdaftar!", "error");
-      return;
+    setIsSyncing(true);
+    // Tarik data terbaru dulu agar tidak menimpa user yang baru daftar di device lain
+    const cloud = await pullFromCloud();
+    const currentUsers = cloud ? cloud.users : registeredUsers;
+
+    if (currentUsers.some(u => u.nip === nip)) {
+      setIsSyncing(false);
+      return showNotification("NIP sudah terdaftar!", "error");
     }
 
     const newUser: User = { id: crypto.randomUUID(), name, nip, role, password };
-    const updatedUsers = [...latestUsers, newUser];
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
-    setRegisteredUsers(updatedUsers);
+    const updatedUsers = [...currentUsers, newUser];
     
-    showNotification("Pendaftaran Berhasil!", "success");
+    setRegisteredUsers(updatedUsers);
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
+    
+    // Push ke cloud
+    await pushToCloud(updatedUsers, reports);
+    setIsSyncing(false);
+    
+    showNotification("Pendaftaran Berhasil & Tersinkron!", "success");
     setAuthMode('login');
   };
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const nip = formData.get('nip') as string;
     const password = formData.get('password') as string;
 
-    const latestUsers = JSON.parse(localStorage.getItem(USERS_STORAGE_KEY) || '[]');
-    const user = latestUsers.find((u: User) => u.nip === nip && u.password === password);
+    setIsSyncing(true);
+    // Selalu tarik data terbaru saat login untuk memastikan device ini punya data user terbaru
+    const cloud = await pullFromCloud();
+    const latestUsers = cloud ? cloud.users : registeredUsers;
     
+    const user = latestUsers.find((u: User) => u.nip === nip && u.password === password);
+    setIsSyncing(false);
+
     if (user) {
       setCurrentUser(user);
       localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-      // Sinkronkan info kendaraan dengan user yang login
-      setVehicleInfo(prev => ({
-        ...prev,
-        driverName: user.name,
-        driverNip: user.nip
-      }));
-      
-      if (user.role !== 'Driver') {
-        setView('history');
-      } else {
-        setView('form');
-      }
-      showNotification(`Selamat datang, ${user.name}!`, "success");
+      setVehicleInfo(prev => ({ ...prev, driverName: user.name, driverNip: user.nip }));
+      if (user.role !== 'Driver') setView('history');
+      showNotification(`Halo, ${user.name}!`, "success");
     } else {
       showNotification("NIP atau Password salah!", "error");
     }
@@ -199,21 +245,18 @@ const App: React.FC = () => {
     localStorage.removeItem(CURRENT_USER_KEY);
     setCurrentUser(null);
     setView('form');
-    showNotification("Anda telah keluar.", "success");
+    showNotification("Berhasil Keluar.", "success");
   };
 
   const saveReport = async () => {
     if (currentUser?.role !== 'Driver') return;
     if (!vehicleInfo.plateNumber) return showNotification("No. Polisi wajib diisi!", "error");
+    
     setIsSaving(true);
     try {
-      const finalVehicleInfo = {
-        ...vehicleInfo,
-        driverName: currentUser.name,
-        driverNip: currentUser.nip
-      };
-
+      const finalVehicleInfo = { ...vehicleInfo, driverName: currentUser.name, driverNip: currentUser.nip };
       const aiAnalysis = await analyzeVehicleHealth({ ...finalVehicleInfo, checks, additionalNote });
+      
       const reportData: SavedReport = {
         ...finalVehicleInfo,
         id: editingId || crypto.randomUUID(),
@@ -221,60 +264,43 @@ const App: React.FC = () => {
         createdAt: new Date().toISOString(),
         createdByNip: currentUser?.nip
       };
-      const updatedReports = editingId ? reports.map(r => r.id === editingId ? reportData : r) : [reportData, ...reports];
+
+      // Tarik data terbaru dulu untuk menghindari data tertimpa
+      const cloud = await pullFromCloud();
+      const currentReports = cloud ? cloud.reports : reports;
+      
+      const updatedReports = editingId 
+        ? currentReports.map(r => r.id === editingId ? reportData : r) 
+        : [reportData, ...currentReports];
+      
       setReports(updatedReports);
       localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(updatedReports));
-      if (syncId) await pushToCloud(updatedReports);
+      
+      // Push ke cloud (Users + Reports)
+      await pushToCloud(registeredUsers, updatedReports);
+      
       setChecks({});
       setAdditionalNote('');
       setEditingId(null);
-      showNotification("Laporan berhasil dikirim!", "success");
+      showNotification("Laporan Terkirim & Tersinkron!", "success");
       setView('history');
-    } catch (e) { showNotification("Gagal simpan", "error"); } finally { setIsSaving(false); }
+    } catch (e) { 
+      showNotification("Gagal simpan", "error"); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
-
-  const pullFromCloud = useCallback(async (targetId: string = syncId) => {
-    if (!targetId) return;
-    setIsSyncing(true);
-    try {
-      const response = await fetch(`${CLOUD_API_BASE}/${targetId}`);
-      if (response.ok) {
-        const cloudData = await response.json();
-        if (Array.isArray(cloudData)) {
-          setReports(cloudData);
-          localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(cloudData));
-          showNotification("Data Cloud Sinkron!", "success");
-        }
-      }
-    } catch (e) { showNotification("Gagal tarik data", "error"); } finally { setIsSyncing(false); }
-  }, [syncId]);
-
-  const pushToCloud = useCallback(async (data: SavedReport[]) => {
-    if (!syncId) return;
-    try {
-      await fetch(`${CLOUD_API_BASE}/${syncId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-    } catch (e) { console.error(e); }
-  }, [syncId]);
 
   const deleteReport = async (id: string) => {
     if (!window.confirm("Hapus laporan ini?")) return;
     const updatedReports = reports.filter(r => r.id !== id);
     setReports(updatedReports);
     localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(updatedReports));
-    if (syncId) {
-      try {
-        await pushToCloud(updatedReports);
-      } catch (e) {
-        console.error("Cloud delete failed:", e);
-      }
-    }
-    showNotification("Laporan berhasil dihapus", "success");
+    await pushToCloud(registeredUsers, updatedReports);
+    showNotification("Laporan terhapus", "success");
   };
 
+  // UI Components
   const NotificationToast = () => {
     if (!toast.visible) return null;
     return (
@@ -337,7 +363,10 @@ const App: React.FC = () => {
                 <img src={LOGO_URL} alt="Logo BPMP" className="w-24 h-24 object-contain" />
               </div>
               <h1 className="text-4xl font-black tracking-tighter">Ceklis Randis</h1>
-              <p className="text-slate-400 font-bold uppercase tracking-[0.4em] text-[10px] mt-2">Kemen-dikdasmen BPMP Lampung</p>
+              <p className="text-slate-400 font-bold uppercase tracking-[0.4em] text-[10px] mt-2 flex items-center gap-2">
+                {isSyncing ? <RefreshCw className="animate-spin text-indigo-400" size={10} /> : <Cloud size={10} className="text-emerald-400" />}
+                Kemen-dikdasmen BPMP Lampung
+              </p>
             </div>
             <div className="bg-white/10 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
                <div className="flex bg-white/5 rounded-2xl p-1 mb-8">
@@ -370,7 +399,9 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl font-black text-xs tracking-[0.2em] shadow-xl uppercase transition-all">Masuk Sistem</button>
+                  <button type="submit" disabled={isSyncing} className="w-full bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl font-black text-xs tracking-[0.2em] shadow-xl uppercase transition-all flex items-center justify-center gap-3">
+                    {isSyncing ? <Loader2 className="animate-spin" size={20} /> : "Masuk Sistem"}
+                  </button>
                 </form>
               ) : (
                 <form onSubmit={handleRegister} className="space-y-4">
@@ -430,7 +461,9 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 py-4 rounded-xl font-black text-xs tracking-[0.2em] shadow-lg uppercase transition-all mt-2">Daftar Akun</button>
+                  <button type="submit" disabled={isSyncing} className="w-full bg-indigo-600 hover:bg-indigo-700 py-4 rounded-xl font-black text-xs tracking-[0.2em] shadow-lg uppercase transition-all mt-2 flex items-center justify-center gap-2">
+                    {isSyncing ? <Loader2 className="animate-spin" size={18} /> : "Daftar Akun"}
+                  </button>
                 </form>
               )}
             </div>
@@ -446,7 +479,10 @@ const App: React.FC = () => {
                   <div className="bg-white p-1.5 rounded-xl"><img src={LOGO_URL} className="w-8 h-8 object-contain" alt="Logo"/></div>
                   <div><h1 className="font-extrabold text-sm sm:text-lg">Ceklis Randis</h1><p className="text-[9px] text-slate-500 font-bold uppercase">BPMP LAMPUNG</p></div>
                 </div>
-                <button onClick={handleLogout} className="p-2.5 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-500 rounded-xl transition-all border border-slate-700 shadow-inner"><LogOut size={18}/></button>
+                <div className="flex gap-2">
+                  <button onClick={() => pullFromCloud()} className={`p-2.5 bg-slate-800 rounded-xl transition-all border border-slate-700 shadow-inner ${isSyncing ? 'text-indigo-400 animate-spin' : 'text-slate-400'}`}><RefreshCw size={18}/></button>
+                  <button onClick={handleLogout} className="p-2.5 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-500 rounded-xl transition-all border border-slate-700 shadow-inner"><LogOut size={18}/></button>
+                </div>
               </div>
               <div className="flex bg-slate-800/50 rounded-2xl p-1 border border-slate-800">
                 {currentUser.role === 'Driver' && (
@@ -462,27 +498,34 @@ const App: React.FC = () => {
             {view === 'history' ? (
               <div className="space-y-6">
                 <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Cari plat nomor..." className="w-full bg-white border-2 border-slate-200 rounded-2xl pl-12 pr-6 py-4.5 text-sm font-semibold outline-none focus:border-indigo-500" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
-                {reports.filter(r => r.plateNumber.includes(searchQuery.toUpperCase())).map(r => (
-                  <div key={r.id} className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm group">
-                    <div className="flex justify-between items-start mb-6">
-                      <div>
-                        <span className="inline-flex px-3 py-1 rounded-full text-[9px] font-black bg-indigo-50 text-indigo-600 uppercase mb-2 tracking-widest">{r.plateNumber}</span>
-                        <h3 className="font-extrabold text-xl text-slate-800">{r.vehicleType}</h3>
-                        <p className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{r.month} {r.year} • {r.driverName}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        {currentUser.role === 'Driver' && <button onClick={() => deleteReport(r.id)} className="text-slate-400 hover:text-rose-500 p-2"><Trash2 size={18}/></button>}
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setPreviewReport(r)} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-2xl font-black text-[10px] uppercase shadow-sm transition-all active:scale-95"><Eye size={16} /> Lihat Record</button>
-                        <button onClick={() => { const blob = generateWordBlob(r); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Ceklis_${r.plateNumber}.doc`; a.click(); }} className="flex items-center justify-center gap-2 bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg transition-all active:scale-95"><ExternalLink size={16} /> Download DOC</button>
-                      </div>
-                      <button onClick={() => window.open(`https://wa.me/?text=*CEKLIS RANDIS BPMP*%0A*Unit:* ${r.vehicleType}%0A*Plat:* ${r.plateNumber}%0A*Bulan:* ${r.month}`)} className="w-full flex items-center justify-center gap-2 bg-emerald-500 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg"><MessageCircle size={16} /> WhatsApp</button>
-                    </div>
+                {reports.filter(r => r.plateNumber.includes(searchQuery.toUpperCase())).length === 0 ? (
+                  <div className="py-20 text-center">
+                    <History className="mx-auto text-slate-200 mb-4" size={64} />
+                    <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Belum ada riwayat</p>
                   </div>
-                ))}
+                ) : (
+                  reports.filter(r => r.plateNumber.includes(searchQuery.toUpperCase())).map(r => (
+                    <div key={r.id} className="bg-white rounded-[2rem] p-6 border border-slate-200 shadow-sm group">
+                      <div className="flex justify-between items-start mb-6">
+                        <div>
+                          <span className="inline-flex px-3 py-1 rounded-full text-[9px] font-black bg-indigo-50 text-indigo-600 uppercase mb-2 tracking-widest">{r.plateNumber}</span>
+                          <h3 className="font-extrabold text-xl text-slate-800">{r.vehicleType}</h3>
+                          <p className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{r.month} {r.year} • {r.driverName}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          {(currentUser.role === 'Driver' || currentUser.role === 'Katim') && <button onClick={() => deleteReport(r.id)} className="text-slate-400 hover:text-rose-500 p-2"><Trash2 size={18}/></button>}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <button onClick={() => setPreviewReport(r)} className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-4 rounded-2xl font-black text-[10px] uppercase shadow-sm transition-all active:scale-95"><Eye size={16} /> Lihat Record</button>
+                          <button onClick={() => { const blob = generateWordBlob(r); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `Ceklis_${r.plateNumber}.doc`; a.click(); }} className="flex items-center justify-center gap-2 bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg transition-all active:scale-95"><ExternalLink size={16} /> Download DOC</button>
+                        </div>
+                        <button onClick={() => window.open(`https://wa.me/?text=*CEKLIS RANDIS BPMP*%0A*Unit:* ${r.vehicleType}%0A*Plat:* ${r.plateNumber}%0A*Bulan:* ${r.month}`)} className="w-full flex items-center justify-center gap-2 bg-emerald-500 text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg"><MessageCircle size={16} /> WhatsApp</button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             ) : view === 'form' ? (
               <div className="space-y-6">
@@ -631,6 +674,7 @@ const App: React.FC = () => {
                   <button onClick={() => { localStorage.setItem(SYNC_ID_STORAGE_KEY, syncId); pullFromCloud(); }} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-center gap-2">
                     {isSyncing ? <Loader2 className="animate-spin" size={18}/> : <><Cloud size={18}/> Hubungkan Sekarang</>}
                   </button>
+                  <p className="text-[9px] text-slate-400 italic text-center px-4 leading-relaxed">PENTING: Gunakan ID Database yang sama di semua perangkat untuk mensinkronkan Akun Driver dan Riwayat Laporan.</p>
                 </div>
               </div>
             )}
