@@ -9,9 +9,7 @@ export default defineConfig({
     host: true
   },
   define: {
-    // Memastikan process.env tersedia di browser saat development
-    'process.env': {
-      API_KEY: JSON.stringify(process.env.VITE_API_KEY || "")
-    }
+    // Memastikan process.env.API_KEY tersedia di browser
+    'process.env.API_KEY': JSON.stringify(process.env.VITE_API_KEY || process.env.API_KEY || "")
   }
 });
